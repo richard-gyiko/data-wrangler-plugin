@@ -202,7 +202,7 @@ def main() -> None:
     options = req.get("options", {})
     max_rows = int(options.get("max_rows", DEFAULT_MAX_ROWS))
     max_bytes = int(options.get("max_bytes", DEFAULT_MAX_BYTES))
-    output_format = options.get("format", "json")  # json, records, csv
+    output_format = options.get("format", "markdown")  # markdown, json, records, csv
 
     try:
         con = duckdb.connect(database=":memory:")
@@ -233,7 +233,24 @@ def main() -> None:
             truncated = True
 
         # Format output based on requested format
-        if output_format == "records":
+        if output_format == "markdown":
+            # Default: LLM-friendly markdown table
+            def format_cell(val):
+                s = str(val) if val is not None else ""
+                return s.replace("|", "\\|").replace("\n", " ")
+            
+            header = "| " + " | ".join(format_cell(c) for c in cols) + " |"
+            separator = "|" + "|".join("---" for _ in cols) + "|"
+            data_rows = ["| " + " | ".join(format_cell(v) for v in row) + " |" for row in rows]
+            table = "\n".join([header, separator] + data_rows)
+            
+            result_parts = [table]
+            if truncated:
+                result_parts.append(f"\n*Results truncated to {len(rows)} rows*")
+            
+            print("\n".join(result_parts))
+            return
+        elif output_format == "records":
             # Return as list of dicts (JSON records)
             out_obj = {
                 "data": [dict(zip(cols, row)) for row in rows],
@@ -256,7 +273,7 @@ def main() -> None:
                 "error": None,
             }
         else:
-            # Default: json format with schema + rows
+            # json format with schema + rows
             out_obj = {
                 "schema": [{"name": c, "type": t} for c, t in zip(cols, types)],
                 "rows": rows,

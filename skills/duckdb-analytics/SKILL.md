@@ -69,9 +69,17 @@ Define sources to create named views for cleaner SQL:
 **Options:**
 - `max_rows`: Maximum rows to return (default: 200)
 - `max_bytes`: Maximum response size in bytes (default: 200000)
-- `format`: Output format - `json` (schema+rows), `records` (list of dicts), or `csv`
+- `format`: Output format - `markdown` (default, LLM-friendly table), `json` (schema+rows), `records` (list of dicts), or `csv`
 
-**Response (json format - default):**
+**Response (markdown format - default):**
+```
+| column1 | column2 | column3 |
+|---|---|---|
+| value1 | value2 | value3 |
+| value4 | value5 | value6 |
+```
+
+**Response (json format):**
 ```json
 {
   "schema": [{"name": "col1", "type": "INTEGER"}],
