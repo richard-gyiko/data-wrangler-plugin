@@ -1,0 +1,20 @@
+{
+  "name": "duckdb-analytics",
+  "description": "Run DuckDB SQL queries over CSV, Parquet, JSON, Excel, and database sources for data exploration and analytics",
+  "version": "1.0.0",
+  "author": {
+    "name": "Richard Gyiko"
+  },
+  "homepage": "https://github.com/richard-gyiko/duckdb-analytics-plugin",
+  "repository": "https://github.com/richard-gyiko/duckdb-analytics-plugin",
+  "license": "MIT",
+  "keywords": [
+    "duckdb",
+    "sql",
+    "analytics",
+    "csv",
+    "parquet",
+    "data-analysis",
+    "excel"
+  ]
+}

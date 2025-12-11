@@ -1,0 +1,20 @@
+{
+  "name": "duckdb-analytics-marketplace",
+  "owner": {
+    "name": "Richard Gyiko"
+  },
+  "metadata": {
+    "description": "DuckDB Analytics plugin for Claude Code - SQL queries over tabular data",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "duckdb-analytics",
+      "source": ".",
+      "description": "Run DuckDB SQL queries over CSV, Parquet, JSON, Excel, and database sources for data exploration and analytics",
+      "version": "1.0.0",
+      "keywords": ["duckdb", "sql", "analytics", "data"],
+      "category": "data-analysis"
+    }
+  ]
+}
