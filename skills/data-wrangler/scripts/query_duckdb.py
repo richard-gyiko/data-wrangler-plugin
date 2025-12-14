@@ -514,13 +514,18 @@ def write_output(
     """
     Execute query and write results to file using COPY TO.
 
-    Returns metadata about the write operation including path, size, and duration.
+    Returns metadata about the write operation including rows_written,
+    files_created, and total_size_bytes.
     """
     import time
 
     start_time = time.time()
     opts = output.options
     format_str = output.format.upper()
+
+    # Count rows before writing (for verification)
+    count_result = con.execute(f"SELECT COUNT(*) FROM ({query}) AS _count_q").fetchone()
+    rows_written = count_result[0] if count_result else 0
 
     # Check for overwrite protection (for non-partitioned writes)
     path = Path(output.path)
@@ -574,34 +579,123 @@ def write_output(
 
     duration_ms = int((time.time() - start_time) * 1000)
 
-    # Gather metadata
+    # Gather file info
+    path = Path(output.path)
+    files_created: list[str] = []
+    total_size_bytes = 0
+
+    if path.is_file():
+        files_created = [output.path]
+        total_size_bytes = path.stat().st_size
+    elif path.is_dir() or opts.partition_by:
+        # Partitioned output - list all created files
+        ext = output.format if output.format != "json" else "json"
+        files = list(path.rglob(f"*.{ext}"))
+        files_created = [str(f) for f in sorted(files)]
+        total_size_bytes = sum(f.stat().st_size for f in files)
+
     result: dict = {
         "success": True,
         "output_path": output.path,
         "format": output.format,
+        "rows_written": rows_written,
+        "files_created": files_created,
+        "total_size_bytes": total_size_bytes,
         "duration_ms": duration_ms,
         "warnings": [],
         "error": None,
     }
 
-    # Try to get file size and partition info
-    path = Path(output.path)
-    if path.is_file():
-        result["file_size_bytes"] = path.stat().st_size
-    elif path.is_dir():
-        # Partitioned output - list partitions
-        ext = output.format if output.format != "json" else "json"
-        files = list(path.rglob(f"*.{ext}"))
-        result["file_count"] = len(files)
-        result["total_size_bytes"] = sum(f.stat().st_size for f in files)
-        # Extract partition paths
-        partitions = set()
-        for f in files:
-            rel = f.relative_to(path)
-            if len(rel.parts) > 1:
-                partitions.add("/".join(rel.parts[:-1]))
-        if partitions:
-            result["partitions"] = sorted(partitions)
+    return result
+
+
+# =============================================================================
+# Explore Mode Functions
+# =============================================================================
+
+
+def detect_format(path: str) -> str:
+    """Detect file format from extension."""
+    ext = Path(path).suffix.lower()
+    format_map = {
+        ".csv": "csv",
+        ".tsv": "csv",
+        ".parquet": "parquet",
+        ".json": "json",
+        ".ndjson": "ndjson",
+        ".xlsx": "excel",
+    }
+    return format_map.get(ext, "unknown")
+
+
+def explore_data(
+    con: duckdb.DuckDBPyConnection,
+    target: str,
+    sample_rows: int = 10,
+    file_path: Optional[str] = None,
+) -> dict:
+    """
+    Explore a data source returning schema, stats, and sample.
+
+    Args:
+        con: DuckDB connection
+        target: SQL target (quoted path or view name)
+        sample_rows: Number of sample rows to return
+        file_path: Original file path for format detection (optional)
+
+    Returns:
+        dict with row_count, columns, sample, and optionally format/file
+    """
+    result: dict = {}
+
+    # Add file info if exploring a file
+    if file_path:
+        result["file"] = file_path
+        result["format"] = detect_format(file_path)
+
+    # 1. Get column info via DESCRIBE
+    describe_result = con.execute(f"DESCRIBE SELECT * FROM {target}").fetchall()
+    columns = []
+    col_names = []
+    for col in describe_result:
+        columns.append({"name": col[0], "type": col[1]})
+        col_names.append(col[0])
+
+    # 2. Get row count
+    count_result = con.execute(f"SELECT COUNT(*) FROM {target}").fetchone()
+    row_count = count_result[0] if count_result else 0
+    result["row_count"] = row_count
+
+    # 3. Get null counts per column (skip if empty or too many columns)
+    if row_count > 0 and len(columns) <= 50:
+        null_exprs = [
+            f"SUM(CASE WHEN {escape_identifier(c['name'])} IS NULL THEN 1 ELSE 0 END)"
+            for c in columns
+        ]
+        null_sql = f"SELECT {', '.join(null_exprs)} FROM {target}"
+        null_result = con.execute(null_sql).fetchone()
+        if null_result:
+            for i, c in enumerate(columns):
+                null_count = null_result[i] or 0
+                c["null_count"] = null_count
+                c["null_percent"] = round(100 * null_count / row_count, 1)
+    else:
+        # Skip null counts for empty tables or very wide tables
+        for c in columns:
+            c["null_count"] = 0
+            c["null_percent"] = 0.0
+
+    result["columns"] = columns
+
+    # 4. Get sample rows formatted as markdown
+    sample_df = con.execute(f"SELECT * FROM {target} LIMIT {sample_rows}").pl()
+    with pl.Config(
+        tbl_formatting="MARKDOWN",
+        tbl_hide_dataframe_shape=True,
+        tbl_hide_column_data_types=True,
+        set_tbl_width_chars=1000,
+    ):
+        result["sample"] = str(sample_df)
 
     return result
 
@@ -789,6 +883,55 @@ def main() -> None:
         print(json.dumps({"error": f"Invalid JSON input: {e}"}))
         return
 
+    # Determine mode: explore, query (default), or write (if output provided)
+    mode = req.get("mode", "query")
+
+    # === EXPLORE MODE ===
+    if mode == "explore":
+        path = req.get("path")
+        sources = req.get("sources", [])
+        sample_rows = int(req.get("sample_rows", 10))
+        secrets_file = req.get("secrets_file")
+
+        if not path and not sources:
+            print(json.dumps({"error": "Explore mode requires 'path' or 'sources'"}))
+            return
+
+        try:
+            con = duckdb.connect(database=":memory:")
+            con.execute("PRAGMA memory_limit='1GB';")
+            con.execute("PRAGMA threads=4;")
+
+            # Load secrets if needed
+            secrets_dict: Optional[Dict[str, AnySecret]] = None
+            if secrets_file:
+                secrets_config = load_secrets_from_yaml(secrets_file)
+                secrets_dict = secrets_config.secrets
+                register_all_secrets(con, secrets_config)
+
+            # Determine target to explore
+            if path:
+                # Direct file exploration
+                target = escape_string(path)
+                result = explore_data(con, target, sample_rows, file_path=path)
+            else:
+                # Explore first source via alias
+                src = sources[0]
+                alias = src.get("alias", "source")
+                load_source(con, src, secrets_dict)
+                target = escape_identifier(alias)
+                result = explore_data(con, target, sample_rows)
+                result["source"] = alias
+
+            print(json.dumps(result, default=str))
+
+        except FileNotFoundError as e:
+            print(json.dumps({"error": str(e)}))
+        except Exception as e:
+            print(json.dumps({"error": str(e)}))
+        return
+
+    # === QUERY/WRITE MODE ===
     query = req.get("query")
     if not query:
         print(json.dumps({"error": "Missing 'query'"}))
@@ -797,14 +940,14 @@ def main() -> None:
     sources = req.get("sources", [])
     options = req.get("options", {})
     secrets_file = req.get("secrets_file")
-    output_config_raw = req.get("output")  # NEW: Write mode configuration
+    output_config_raw = req.get("output")  # Write mode configuration
     max_rows = int(options.get("max_rows", DEFAULT_MAX_ROWS))
     max_bytes = int(options.get("max_bytes", DEFAULT_MAX_BYTES))
     output_format = options.get("format", "markdown")  # markdown, json, records, csv
 
     # Load secrets from YAML file if provided
     secrets_config: Optional[SecretsConfig] = None
-    secrets_dict: Optional[Dict[str, AnySecret]] = None
+    secrets_dict = None
     
     if secrets_file:
         try:

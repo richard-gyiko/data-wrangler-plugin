@@ -17,6 +17,7 @@ Transform and export data using DuckDB SQL.
 ## Contents
 
 - [Usage](#usage) - Command syntax and Windows escaping
+- [Explore Mode](#explore-mode) - Quick data profiling
 - [Query Mode](#query-mode) - Return results to Claude
 - [Write Mode](#write-mode) - Export to files
 - [Request/Response Format](#requestresponse-format) - JSON structure
@@ -35,6 +36,32 @@ Transform and export data using DuckDB SQL.
 ```bash
 cd "<skill_directory>" && echo "{\"query\": \"SELECT * FROM 'D:/path/to/file.csv'\"}" | uv run scripts/query_duckdb.py
 ```
+
+## Explore Mode
+
+**Get schema, statistics, and sample in one call.** Use before writing queries to understand data structure.
+
+```json
+{"mode": "explore", "path": "D:/data/sales.csv"}
+```
+
+**Response:**
+```json
+{
+  "file": "D:/data/sales.csv",
+  "format": "csv",
+  "row_count": 15234,
+  "columns": [
+    {"name": "order_id", "type": "BIGINT", "null_count": 0, "null_percent": 0.0},
+    {"name": "customer", "type": "VARCHAR", "null_count": 45, "null_percent": 0.3}
+  ],
+  "sample": "| order_id | customer | ... |\\n|----------|----------|-----|\\n| 1001     | Alice    | ... |"
+}
+```
+
+**Options:**
+- `sample_rows`: Number of sample rows (default: 10, max: 100)
+- `sources`: For database tables (same as query mode)
 
 ## Query Mode
 
@@ -101,15 +128,17 @@ Export query results to files. Add an `output` object to write instead of return
 
 ### Write Response
 
+Response includes verification info - no need for follow-up queries:
+
 ```json
 {
   "success": true,
   "output_path": "D:/output/events/",
   "format": "parquet",
-  "duration_ms": 1234,
-  "file_count": 24,
+  "rows_written": 15234,
+  "files_created": ["D:/output/events/year=2023/data_0.parquet", "..."],
   "total_size_bytes": 5678901,
-  "partitions": ["year=2023/month=1", "year=2023/month=2", "..."]
+  "duration_ms": 1234
 }
 ```
 

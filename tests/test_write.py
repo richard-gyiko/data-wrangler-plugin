@@ -44,7 +44,9 @@ class TestWriteParquet:
         assert result.get("output_path") == str(output_file)
         assert result.get("format") == "parquet"
         assert output_file.exists()
-        assert result.get("file_size_bytes", 0) > 0
+        assert result.get("total_size_bytes", 0) > 0
+        assert result.get("rows_written") == 2
+        assert str(output_file) in result.get("files_created", [])
         assert result.get("duration_ms") >= 0
 
     def test_write_parquet_with_compression(self, tmp_path):
