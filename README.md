@@ -6,6 +6,8 @@ A Claude Code plugin that enables powerful data transformation and export using 
 
 - **Multiple file formats**: CSV, Parquet, JSON/NDJSON, Excel (.xlsx)
 - **Database connections**: Postgres, MySQL, SQLite, S3
+- **Cloud storage**: AWS S3, Azure Blob, Google Cloud Storage, Cloudflare R2
+- **Secrets management**: Secure credential storage with environment variable substitution
 - **Direct file queries**: Query files directly by path
 - **Aliased sources**: Join multiple datasets with clean SQL
 - **Write mode**: Export results to Parquet, CSV, or JSON
@@ -47,6 +49,29 @@ Once installed, Claude will automatically use this skill when you ask data trans
 
 **Create partitioned dataset:**
 > "Convert events.json to Parquet partitioned by year and month"
+
+## Secrets Management
+
+Store database and cloud credentials securely using a YAML secrets file with environment variable substitution.
+
+**Create `secrets.yaml`:**
+```yaml
+secrets:
+  my_postgres:
+    type: postgres
+    host: db.example.com
+    user: analyst
+    password: "${PGPASSWORD}"  # Uses environment variable
+    database: analytics
+```
+
+**Supported secret types:**
+- **Databases**: PostgreSQL, MySQL
+- **Cloud storage**: AWS S3, Azure Blob, Google Cloud Storage, Cloudflare R2
+- **HTTP**: Bearer token authentication
+- **Other**: HuggingFace, Iceberg, DuckLake
+
+See [SECRETS.md](skills/data-wrangler/SECRETS.md) for full configuration options.
 
 ## How It Works
 
